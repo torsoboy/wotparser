@@ -7,12 +7,13 @@
 #
 # Written by Tor5oBoy (iamtorsoboy@gmail.com)
 
-#System imports
+# System imports
 import datetime
+import optparse
 import re
 import urllib2
 
-#3rd party imports
+# 3rd party imports
 from bs4 import BeautifulSoup
 
 class WotWikiParser(object):
@@ -22,14 +23,30 @@ class WotWikiParser(object):
         - findTanks(): Used to find all vehicles from each country.
         - parseTankData(): Parse values for each tank.
         - docCreate(): Write the data out to a CSV file.'''
+
     def __init__(self):
-        pass
+        self._tank_types = ['Light Tanks', 'Medium Tanks', 'Heavy Tanks',
+                            'Tank Destroyers', 'Self-Propelled Guns']
+
+    @property
+    def tank_types(self):
+        '''Return tank_types via getter.'''
+        return self._tank_types
+
+    @tank_types.setter
+    def tank_types(self, types):
+        '''Return tank_types via getter.'''
+        self._tank_types = types
 
     def findVersion(self, url, region='NA'):
         '''Find the current version of the game. An optional region can be
         specified. Available countries: Asia, EU, NA. Default: NA.'''
         # Initialize the soup.
-        html = urllib2.urlopen(url).read()
+        try:
+            html = urllib2.urlopen(url).read()
+        except:
+            print 'Failed to open URL: ' + url
+            exit(1)
         soup = BeautifulSoup(html, 'html.parser')
         # Based on the region passed, look for the version in the <a> tag.
         if 'NA' in region:
@@ -46,13 +63,17 @@ class WotWikiParser(object):
         passed and returns the list in an array. Expects a url in the form of:
         wiki.worldoftanks.com/USSR.'''
         # Initialize the soup.
-        html = urllib2.urlopen(url).read()
+        try:
+            html = urllib2.urlopen(url).read()
+        except:
+            print 'Failed to open URL: ' + url
+            exit(1)
         soup = BeautifulSoup(html, 'html.parser')
         links = []
-        tank_types = ['Light Tanks', 'Medium Tanks', 'Heavy Tanks', 
-                      'Tank Destroyers', 'Self-Propelled Guns']
+        #tank_types = ['Light Tanks', 'Medium Tanks', 'Heavy Tanks', 
+        #              'Tank Destroyers', 'Self-Propelled Guns']
         # Grab the url for each tank type in the list above.
-        for tank_type in tank_types:
+        for tank_type in self.tank_types:
             if soup.find('div', text=re.compile(tank_type)):
                 tanks = soup.find('div', text=re.compile(tank_type)).find_next('ul').find_all('li')
                 for t in tanks:
@@ -71,7 +92,11 @@ class WotWikiParser(object):
         if re.match('(.+)SU-14$', url):
             url = url + '-2'
         # Initialize the soup.
-        html = urllib2.urlopen(url).read()
+        try:
+            html = urllib2.urlopen(url).read()
+        except:
+            print 'Failed to open URL: ' + url
+            exit(1)
         soup = BeautifulSoup(html, 'html.parser')
         info = soup.find('div', {'class':'Tank'})
         # Initialize all the values in case they don't appear in the HTML.
@@ -232,16 +257,75 @@ class WotWikiParser(object):
                 f.write('\n')
 
 if __name__ == '__main__':
+    # Command line options
+    usage_text = 'This program is designed to parse data from the World of ' + \
+    'Tanks wiki. By default it will parse the data for all vehicles in all ' + \
+    'countries. See the options below for parsing specific data. ' + \
+    '\n\n' + \
+    'Please note: Specifying vehicles is mutually exclusive from ' + \
+    'specifying countries or vehicle types.'
+    parser = optparse.OptionParser(usage=usage_text)
+    parser.add_option('-c', '--countries', default=None, dest='countries',
+        help='Available countries: USA, UK, Germany, France, USSR, China. ' +
+        'Specify one or more in a comma separated list. Default: all.')
+    parser.add_option('-f', '--file', default=None, dest='outfile',
+        help='File write data to. Default: WoT_Tank_data.csv.')
+    parser.add_option('-t', '--types', default=None, dest='types',
+        help='Available types: Light, Medium, Heavy, TD, SPG. Specify ' +
+        'one or more in a comma separated list. Default: all.')
+    parser.add_option('-v', '--vehicles', default=None, dest='vehicles',
+        help='Specify a vehicle name in quotes. Specify one or more in a ' +
+        'comma separated list. Example: "Tiger II, T-34, WZ-120".')
+    (options, args) = parser.parse_args()
+    # Prevent using specific vehicles with types or countries.
+    if options.vehicles and (options.types or options.countries):
+        print 'Vehicles cannot be specified with countries or types.'
+        exit(1)
+
+    # Setup some default values.
     data = []
     outfile = 'WoT_Tank_Data.csv'
-    wiki = 'http://wiki.worldoftanks.com/'
     countries = ['USA', 'UK', 'Germany', 'France', 'USSR', 'China']
+    wiki = 'http://wiki.worldoftanks.com/'
+    tank_types = {'Light':'Light Tanks', 'Medium':'Medium Tanks',
+                  'Heavy':'Heavy Tanks', 'TD':'Tank Destroyers',
+                  'SPG':'Self-Propelled Guns'}
+    # Initialize the class.
     w = WotWikiParser()
     version = w.findVersion(wiki)
-    for country in countries:
-        tank_list = w.findTanks(wiki + country)
-        for tank in tank_list:
-            print 'Looking for: ' + tank
-            data.append(w.parseTankData(wiki + tank))
+    # If output file is specified on the CLI use that, otherwise use default.
+    if options.outfile:
+        outfile = options.outfile
+    # If countries are specified on the CLI use those, otherwise use the
+    # default values.
+    if options.countries:
+        countries = options.countries.split(',')
+    # If vehicle types are specified on the CLI, then reset the tank_types
+    # variable to those instead of the default.
+    if options.types:
+        types = options.types.split(',')
+        w.tank_types = []
+        for t in types:
+            if t in tank_types:
+                w.tank_types.append(tank_types[t])
+            else:
+                print 'Skipping invalid vehicle type: ' + t
+    # If vehicle list is passed on CLI, use that list to parse data for
+    # specified vehicles, otherwise parse the data for vehicles and
+    # countries specified.
+    if options.vehicles:
+        vehicles = [options.vehicles]
+        for v in vehicles:
+            v = v.replace(' ', '_')
+            data.append(w.parseTankData(wiki + v))
+    else:
+        # Parse countries array, find all tanks each that country's page, and
+        # parse the data for those tanks.
+        for country in countries:
+            tank_list = w.findTanks(wiki + country)
+            for tank in tank_list:
+                print 'Looking for: ' + tank
+                data.append(w.parseTankData(wiki + tank))
+    # Write the compiled data to the document.
     print 'Writing data to document'
     w.docCreate(version, data, outfile)
