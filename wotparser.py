@@ -1,14 +1,14 @@
 #! /usr/bin/python
 
 # This program scrapes data from the World of Tanks wiki 
-# (wiki.worldoftanks.com) and dumps it in to a CSV file.
-# Requires BeautifulSoup Python module:
-# (http://www.crummy.com/software/BeautifulSoup/)
+# (wiki.worldoftanks.com) and dumps it in to a CSV file. Requires BeautifulSoup
+# Python module: (http://www.crummy.com/software/BeautifulSoup/)
 #
 # Written by Tor5oBoy (iamtorsoboy@gmail.com)
 
 # System imports
 import datetime
+import operator
 import optparse
 import re
 import urllib2
@@ -70,8 +70,6 @@ class WotWikiParser(object):
             exit(1)
         soup = BeautifulSoup(html, 'html.parser')
         links = []
-        #tank_types = ['Light Tanks', 'Medium Tanks', 'Heavy Tanks', 
-        #              'Tank Destroyers', 'Self-Propelled Guns']
         # Grab the url for each tank type in the list above.
         for tank_type in self.tank_types:
             if soup.find('div', text=re.compile(tank_type)):
@@ -80,6 +78,268 @@ class WotWikiParser(object):
                     link = t.find('a').get('href')
                     links.append(link.strip('/'))
         return links
+
+    def findGuns(self, soup):
+        '''Find the list of guns for the tank passed. Expects BeautifulSoup
+        input. Return the list and values in an array of dictionaries:
+        [ { "name": "val",  "he_dmg" : "val", "ap_dmg" : "val", 
+        "penetration" : "val", "rof" : "val", "aim_time" : "val",
+        "accuracy" : "val", "elev" : "val", "tier" : "val" }, ... ].'''
+        info = soup.find_all('table', {'class':'moduleTable'})
+        guns = []
+        elreg = '<td(.+)>[-\+]+[0-9\.]+<span(.+)>/[-\+]+[0-9\.]+<span(.+)></td>'
+        treg = '<td(.+)><span(.+)><span(.+)>[IVX]+</span></td>'
+        # Look through each table we found.
+        # P.S. This code is ugly and it makes me sad.
+        for i in info:
+            if i.find_all('a', title=re.compile('Gun(.*)')):
+                rows = i.find_all('tr')
+                # Look at each of the rows in the table.
+                for r in rows:
+                    td = r.find_all('td')
+                    gun = {'name':'none', 'ap_dmg':{'ap1':'-1'},
+                           'he_dmg':{'he1':'-1'}, 'ap_pen':{'ap1':'-1'},
+                           'he_pen':{'he1':'-1'}, 'rof':'-1', 'aim_time':'-1',
+                           'accuracy':'-1', 'elev':'-1', 'tier':'0'}
+                    # Go through each td element to find our values
+                    for t in td:
+                        # If we find a gun, set the name
+                        if t.find('a', title=re.compile('Gun(.*)')):
+                            gun['name'] = t.find_next('a', title=re.compile('Gun(.*)')).contents[0]
+                        # If we find a line with HP, we're looking at damage so
+                        # find damage for all AP and HE rounds. Some guns have
+                        # multiple AP or HE rounds that can be loaded so we
+                        # have to make sure we find them all.
+                        if t.find('span', text=re.compile('HP')):
+                            if t.find_next('span', {'class':'ammoAP'}):
+                                ap_dmg = {}
+                                ap_gun = 1
+                                for a in t.find_all('span', {'class':'ammoAP'}):
+                                    if a:
+                                        ap_dmg['ap%d' % ap_gun] = int(a.string)
+                                        ap_gun += ap_gun
+                                if ap_dmg:
+                                    gun['ap_dmg'] = ap_dmg
+                            if t.find_next('span', {'class':'ammoHE'}):
+                                he_dmg = {}
+                                he_gun = 1
+                                for a in t.find_all('span', {'class':'ammoHE'}):
+                                    if a:
+                                        he_dmg['he%d' % he_gun] = int(a.string)
+                                        he_gun += he_gun
+                                if he_dmg:
+                                    gun['he_dmg'] = he_dmg
+                        # If we find a line with mm, we're looking at damage so
+                        # find damage for all AP and HE rounds. Some guns have
+                        # multiple AP or HE rounds that can be loaded so we
+                        # have to make sure we find them all.
+                        if t.find('span', text=re.compile('mm')):
+                            if t.find_next('span', {'class':'ammoAP'}):
+                                ap_pen = {}
+                                ap_gun = 1
+                                for a in t.find_all('span', {'class':'ammoAP'}):
+                                    if a:
+                                        ap_pen['ap%d' % ap_gun] = int(a.string)
+                                        ap_gun += ap_gun
+                                if ap_pen:
+                                    gun['ap_pen'] = ap_pen
+                            if t.find_next('span', {'class':'ammoHE'}):
+                                he_pen = {}
+                                he_gun = 1
+                                for h in t.find_all('span', {'class':'ammoHE'}):
+                                    if h:
+                                        he_pen['he%d' % he_gun] = int(h.string)
+                                        he_gun += he_gun
+                                    if he_pen:
+                                        gun['he_pen'] = he_pen
+                        # Find rounds per minute (r/m) and set the RoF.
+                        if t.find('span', text=re.compile('^(\s*)r/m$')):
+                            if re.match('<td(.+)><(div|span)(.+)>[0-9\.]+(.*)', str(t)):
+                                rof = re.split('<|>', str(t))
+                                rof = rof[4]
+                                gun['rof'] = rof
+                            elif re.match('<td(.+)>[0-9\.]+(\s*)(.+)', str(t)):
+                                rof = re.split('<|>', str(t))
+                                rof = rof[2]
+                                gun['rof'] = rof
+                            elif t.find('div'):
+                                if re.match('[0-9]+(\.*)[0-9]*', t.find('div').contents[0]):
+                                    rof = t.find_next('div').contents[0]
+                                    gun['rof'] = rof
+                        # Find meters (m) and set accuracy.
+                        if t.find('span', text=re.compile('^(\s*)m$')):
+                            if t.find('div'):
+                                gun['accuracy'] = t.find_next('div').contents[0]
+                            else:
+                                acc = re.split('<|>', str(t))
+                                acc = acc[2]
+                                gun['accuracy'] = acc
+                        # Find seconds (s) and set aim time.
+                        if t.find('span', text=re.compile('^(\s*)s$')):
+                            if t.find('div'):
+                                gun['aim_time'] = t.find_next('div').contents[0]
+                            else:
+                                aim = re.split('<|>', str(t))
+                                aim = aim[2]
+                                gun['aim_time'] = aim
+                        # Find the tier and set the numerical value.
+                        if re.match(treg, str(t)):
+                            line = re.split ('<|>', str(t))
+                            gun['tier'] = line[6].lstrip('0')
+                        # Find the elevation values and combine them.
+                        if re.match(elreg, str(t)):
+                            line = re.split('<|>', str(t))
+                            gun['elev'] = line[2] + line[6]
+                        elif t.find('span', text='Front:'):
+                            line = re.split('<|>', str(t))
+                            gun['elev'] = line[10].strip(' ') + \
+                                          line[14].strip(' ')
+                    if not re.match('^none$', gun['name']):
+                        guns.append(gun)
+        return guns
+
+    def parseHighestDmg(self, guns):
+        '''Find the gun with the highest damage. Expects a url in the form of:
+        wiki.worldoftanks.com/T1_Cunningham. Return the values in the form of:
+        { "dmg" : "val", "penetration" : "val", "rof" : "val", 
+        "aim_time" : "val", "accuracy" : "val", "elev" : "val",
+        "tier" : "val"}.'''
+        # If dmg is same, go to penetration; if same, highest penetration.
+        gun_info = {'gun_dmg':0, 'gun_pen':0, 'gun_rof':0, 'gun_aim':0,
+                    'gun_acc':0, 'gun_ele':'N/A', 'gun_name':'none',
+                    'gun_tier':0}
+        for gun in guns:
+            for k,v in gun['ap_dmg'].iteritems():
+                if int(v) > gun_info['gun_dmg']:
+                    gun_info['gun_dmg'] = int(v)
+                    gun_info['gun_name'] = gun['name']
+                    gun_info['gun_pen'] = gun['ap_pen'][k]
+                    gun_info['gun_rof'] = gun['rof']
+                    gun_info['gun_aim'] = gun['aim_time']
+                    gun_info['gun_acc'] = gun['accuracy']
+                    gun_info['gun_ele'] = gun['elev']
+                    gun_info['gun_tier'] = gun['tier']
+                elif int(v) == gun_info['gun_dmg']:
+                    if gun['ap_pen'] > gun_info['gun_pen']:
+                        gun_info['gun_dmg'] = int(v)
+                        gun_info['gun_name'] = gun['name']
+                        gun_info['gun_pen'] = gun['ap_pen'][k]
+                        gun_info['gun_rof'] = gun['rof']
+                        gun_info['gun_aim'] = gun['aim_time']
+                        gun_info['gun_acc'] = gun['accuracy']
+                        gun_info['gun_ele'] = gun['elev']
+                        gun_info['gun_tier'] = gun['tier']
+                    elif gun['ap_pen'] == gun_info['gun_pen']:
+                        if gun['rof'] > gun_info['gun_rof']:
+                            gun_info['gun_dmg'] = int(v)
+                            gun_info['gun_name'] = gun['name']
+                            gun_info['gun_pen'] = gun['ap_pen'][k]
+                            gun_info['gun_rof'] = gun['rof']
+                            gun_info['gun_aim'] = gun['aim_time']
+                            gun_info['gun_acc'] = gun['accuracy']
+                            gun_info['gun_ele'] = gun['elev']
+                            gun_info['gun_tier'] = gun['tier']
+            for k,v in gun['he_dmg'].iteritems():
+                if int(v) > gun_info['gun_dmg']:
+                    gun_info['gun_dmg'] = int(v)
+                    gun_info['gun_name'] = gun['name']
+                    gun_info['gun_pen'] = gun['he_pen'][k]
+                    gun_info['gun_rof'] = gun['rof']
+                    gun_info['gun_aim'] = gun['aim_time']
+                    gun_info['gun_acc'] = gun['accuracy']
+                    gun_info['gun_ele'] = gun['elev']
+                elif int(v) == gun_info['gun_dmg']:
+                    if gun['he_pen'] > gun_info['gun_pen']:
+                        gun_info['gun_dmg'] = int(v)
+                        gun_info['gun_name'] = gun['name']
+                        gun_info['gun_pen'] = gun['he_pen'][k]
+                        gun_info['gun_rof'] = gun['rof']
+                        gun_info['gun_aim'] = gun['aim_time']
+                        gun_info['gun_acc'] = gun['accuracy']
+                        gun_info['gun_ele'] = gun['elev']
+                        gun_info['gun_tier'] = gun['tier']
+                    elif gun['he_pen'] == gun_info['gun_pen']:
+                        if gun['rof'] > gun_info['gun_rof']:
+                            gun_info['gun_dmg'] = int(v)
+                            gun_info['gun_name'] = gun['name']
+                            gun_info['gun_pen'] = gun['he_pen'][k]
+                            gun_info['gun_rof'] = gun['rof']
+                            gun_info['gun_aim'] = gun['aim_time']
+                            gun_info['gun_acc'] = gun['accuracy']
+                            gun_info['gun_ele'] = gun['elev']
+                            gun_info['gun_tier'] = gun['tier']
+        return gun_info
+
+    def parseHighestPen(self, guns):
+        '''Find the gun with the highest penetration and return the values in 
+        the form of: { "dmg" : "val", "penetration" : "val", "rof" : "val", 
+        "aim_time" : "val", "accuracy" : "val", "elev" : "val"}.'''
+        # If penetration is same, go to dmg; if same, highest tier.
+        # If dmg is same, go to penetration; if same, highest penetration.
+        gun_info = {'gun_dmg':0, 'gun_pen':0, 'gun_rof':0, 'gun_aim':0,
+                    'gun_acc':0, 'gun_ele':'N/A', 'gun_name':'none',
+                    'gun_tier':0}
+        for gun in guns:
+            for k,v in gun['ap_pen'].iteritems():
+                if int(v) > gun_info['gun_pen']:
+                    gun_info['gun_pen'] = int(v)
+                    gun_info['gun_name'] = gun['name']
+                    gun_info['gun_dmg'] = gun['ap_dmg'][k]
+                    gun_info['gun_rof'] = gun['rof']
+                    gun_info['gun_aim'] = gun['aim_time']
+                    gun_info['gun_acc'] = gun['accuracy']
+                    gun_info['gun_ele'] = gun['elev']
+                    gun_info['gun_tier'] = gun['tier']
+                elif int(v) == gun_info['gun_pen']:
+                    if gun['ap_dmg'] > gun_info['gun_dmg']:
+                        gun_info['gun_pen'] = int(v)
+                        gun_info['gun_name'] = gun['name']
+                        gun_info['gun_dmg'] = gun['ap_dmg'][k]
+                        gun_info['gun_rof'] = gun['rof']
+                        gun_info['gun_aim'] = gun['aim_time']
+                        gun_info['gun_acc'] = gun['accuracy']
+                        gun_info['gun_ele'] = gun['elev']
+                        gun_info['gun_tier'] = gun['tier']
+                    elif gun['ap_dmg'] == gun_info['gun_dmg']:
+                        if gun['rof'] > gun_info['gun_rof']:
+                            gun_info['gun_pen'] = int(v)
+                            gun_info['gun_name'] = gun['name']
+                            gun_info['gun_dmg'] = gun['ap_dmg'][k]
+                            gun_info['gun_rof'] = gun['rof']
+                            gun_info['gun_aim'] = gun['aim_time']
+                            gun_info['gun_acc'] = gun['accuracy']
+                            gun_info['gun_ele'] = gun['elev']
+                            gun_info['gun_tier'] = gun['tier']
+            for k,v in gun['he_pen'].iteritems():
+                if int(v) > gun_info['gun_pen']:
+                    gun_info['gun_pen'] = int(v)
+                    gun_info['gun_name'] = gun['name']
+                    gun_info['gun_dmg'] = gun['he_dmg'][k]
+                    gun_info['gun_rof'] = gun['rof']
+                    gun_info['gun_aim'] = gun['aim_time']
+                    gun_info['gun_acc'] = gun['accuracy']
+                    gun_info['gun_ele'] = gun['elev']
+                elif int(v) == gun_info['gun_pen']:
+                    if gun['he_dmg'] > gun_info['gun_dmg']:
+                        gun_info['gun_pen'] = int(v)
+                        gun_info['gun_name'] = gun['name']
+                        gun_info['gun_dmg'] = gun['he_dmg'][k]
+                        gun_info['gun_rof'] = gun['rof']
+                        gun_info['gun_aim'] = gun['aim_time']
+                        gun_info['gun_acc'] = gun['accuracy']
+                        gun_info['gun_ele'] = gun['elev']
+                        gun_info['gun_tier'] = gun['tier']
+                    elif gun['he_dmg'] == gun_info['gun_dmg']:
+                        if gun['rof'] > gun_info['gun_rof']:
+                            gun_info['gun_pen'] = int(v)
+                            gun_info['gun_name'] = gun['name']
+                            gun_info['gun_dmg'] = gun['he_dmg'][k]
+                            gun_info['gun_rof'] = gun['rof']
+                            gun_info['gun_aim'] = gun['aim_time']
+                            gun_info['gun_acc'] = gun['accuracy']
+                            gun_info['gun_ele'] = gun['elev']
+                            gun_info['gun_tier'] = gun['tier']
+        return gun_info
 
     def parseTankData(self, url):
         '''Parse tank data for url passed. Expects a url for a tank 
@@ -104,21 +364,21 @@ class WotWikiParser(object):
                      'tank_class':'N/A','tank_tier':'N/A','bt_min':'N/A',
                      'bt_max':'N/A','top_hp':'N/A','top_traverse':'N/A',
                      'top_pwr_rto':'N/A','top_hull_armor':'N/A',
-                     'top_tur_armor':'N/A','top_dmg_min':'N/A',
-                     'top_dmg_max':'N/A','top_penetration':'N/A',
-                     'top_rof':'N/A','top_accuracy':'N/A','top_aim_time':'N/A',
-                     'top_tur_traverse':'N/A','top_tur_elevation':'N/A',
-                     'top_fire_chance':'N/A','top_view_range':'N/A',
-                     'top_sig_range':'N/A'}
+                     'top_tur_traverse':'N/A', 'top_fire_chance':'N/A',
+                     'top_view_range':'N/A', 'top_sig_range':'N/A', 
+                     'top_tur_armor':'N/A', 'dmg_avg_dmg':'N/A',
+                     'dmg_penetration':'N/A', 'dmg_rof':'N/A',
+                     'dmg_accuracy':'N/A', 'dmg_tur_elevation':'N/A',
+                     'dmg_aim_time':'N/A', 'pen_avg_dmg':'N/A',
+                     'pen_penetration':'N/A', 'pen_rof':'N/A',
+                     'pen_accuracy':'N/A', 'pen_tur_elevation':'N/A',
+                     'pen_aim_time':'N/A'}
         # If we find data in the soup, start parsing it.
         if info:
             print 'Found tank at %s' % url
             # Parse the key/value pairs in the list and if there is a <div> tag
             # in the <span> use that, otherwise just use the span for the vals.
-            categories = {'Rate of Fire':'top_rof',
-                          'Traverse':'top_traverse',
-                          'Accuracy':'top_accuracy',
-                          'Aim time':'top_aim_time',
+            categories = {'Traverse':'top_traverse',
                           'Gun Traverse Speed':'top_tur_traverse',
                           'Turret Traverse':'top_tur_traverse',
                           'View Range':'top_view_range',
@@ -133,7 +393,6 @@ class WotWikiParser(object):
             # to grab the values.
             categories2 = {'Hit Points':'top_hp',
                            'Power/Wt Ratio':'top_pwr_rto',
-                           'Penetration':'top_penetration',
                            'Chance of Fire':'top_fire_chance'}
             for k,v in categories2.items():
                 if info.find('th', text=re.compile(k)):
@@ -195,26 +454,22 @@ class WotWikiParser(object):
                     tank_vals['top_tur_armor'] = '\'' + turret.find_next('span', 'top').contents[0]
                 else:
                     tank_vals['top_tur_armor'] = '\'' + str(turret.contents[0])
-            # Grab the damage range and split it in to min and max values.
-            if info.find('th', text=re.compile('Damage')):
-                top_dmg = info.find('th', text=re.compile('Damage')).find_next('span', 'top').contents[0]
-                if re.match('[0-9\.]+\-[0-9\.]+', top_dmg):
-                    tank_vals['top_dmg_min'], tank_vals['top_dmg_max'] = top_dmg.split('-')
-                else:
-                    dmg_list = top_dmg.split('/')
-                    dmg = []
-                    for i in dmg_list:
-                        if '.' in i:
-                            dmg.append(float(i))
-                        else:
-                            dmg.append(int(i))
-                    tank_vals['top_dmg_min'] = min(dmg)
-                    tank_vals['top_dmg_max'] = max(dmg)
-            # Grab the elevation values and reassemble them.
-            if info.find('th', text=re.compile('Elevation Arc')):
-                top_elev_min = info.find('th', text=re.compile('Elevation Arc')).find_next('span', 'top').contents[0]
-                top_elev_max = info.find('th', text=re.compile('Elevation Arc')).find_next('span', 'top').contents[2]
-                tank_vals['top_tur_elevation'] = str(top_elev_min) + str(top_elev_max)
+            dmg_gun = self.findGuns(soup)
+            dmg_gun = self.parseHighestDmg(dmg_gun)
+            tank_vals['dmg_avg_dmg'] = dmg_gun['gun_dmg']
+            tank_vals['dmg_penetration'] = dmg_gun['gun_pen']
+            tank_vals['dmg_rof'] = dmg_gun['gun_rof']
+            tank_vals['dmg_accuracy'] = dmg_gun['gun_acc']
+            tank_vals['dmg_tur_elevation'] = dmg_gun['gun_ele']
+            tank_vals['dmg_aim_time'] = dmg_gun['gun_aim']
+            pen_gun = self.findGuns(soup)
+            pen_gun = self.parseHighestPen(pen_gun)
+            tank_vals['pen_avg_dmg'] = pen_gun['gun_dmg']
+            tank_vals['pen_penetration'] = pen_gun['gun_pen']
+            tank_vals['pen_rof'] = pen_gun['gun_rof']
+            tank_vals['pen_accuracy'] = pen_gun['gun_acc']
+            tank_vals['pen_tur_elevation'] = pen_gun['gun_ele']
+            tank_vals['pen_aim_time'] = pen_gun['gun_aim']
         else:
             print 'Something went wrong or no info found at %s!' % url
         return tank_vals
@@ -224,14 +479,19 @@ class WotWikiParser(object):
         from findVersion(), the tank data from parseTankData(), and a file
         name to output to.'''
         sep = '\t'
-        headers = ['Vehicle', 'Class', 'Tier', 'Min Battle Tier', 
-                   'Max Battle Tier', 'Country', 'Power Ratio (hp/t)',
-                   'Traverse Speed (d/s)', 'Hit Points', 'Hull Armor (mm)',
-                   'Turret Armor (mm)', 'Min Dmg (HP)', 'Max Dmg (HP)',
-                   'Rate of Fire (r/m)', 'Penetration (mm)', 'Aim Time (s)',
-                   'Accuracy (m)', 'Gun/Turret Traverse (d/s)',
-                   'View Range (m)', 'Signal Range (m)', 
-                   'Front Elevation (degrees)']
+        headers = ['Vehicle Details', 'Defenses',
+                   'Highest Damage Armament (Excludes Gold Rounds)',
+                   'Highest Penetration Armament (Excludes Gold Rounds)']
+        sub_headers = ['Vehicle', 'Class', 'Tier', 'Min Battle Tier', 
+                       'Max Battle Tier', 'Country', 'Power Ratio (hp/t)',
+                       'Traverse Speed (d/s)', 'Gun/Turret Traverse (d/s)',
+                       'View Range (m)', 'Signal Range (m)',  'Hit Points',
+                       'Hull Armor (mm)', 'Turret Armor (mm)',
+                       'Avg Dmg (HP)', 'Penetration (mm)', 'Rate of Fire (r/m)',
+                       'Aim Time (s)', 'Accuracy (m)',
+                       'Front Elevation (degrees)', 'Avg Dmg (HP)',
+                       'Penetration (mm)', 'Rate of Fire (r/m)', 'Aim Time (s)',
+                       'Accuracy (m)', 'Front Elevation (degrees)']
         with open(outfile, 'w') as f:
             # Write the WoT version.
             f.write('WoT Version:%s%s%s%s' % (sep, str(version), sep, sep))
@@ -243,14 +503,20 @@ class WotWikiParser(object):
             for h in headers:
                 f.write(h + sep)
             f.write('\n')
+            # Write the sub-headers
+            for s in sub_headers:
+                f.write(s + sep)
+            f.write('\n')
             # Write the tank data in the order from the list.
             tank_vals = ['tank_name', 'tank_class', 'tank_tier', 'bt_min',
                          'bt_max', 'tank_country', 'top_pwr_rto', 
-                         'top_traverse', 'top_hp', 'top_hull_armor',
-                         'top_tur_armor', 'top_dmg_min', 'top_dmg_max',
-                         'top_rof', 'top_penetration', 'top_aim_time',
-                         'top_accuracy', 'top_tur_traverse', 'top_view_range',
-                         'top_sig_range', 'top_tur_elevation']
+                         'top_traverse','top_tur_traverse', 'top_view_range',
+                         'top_sig_range', 'top_hp', 'top_hull_armor',
+                         'top_tur_armor', 'dmg_avg_dmg', 'dmg_penetration',
+                         'dmg_rof', 'dmg_aim_time', 'dmg_accuracy',
+                         'dmg_tur_elevation', 'pen_avg_dmg', 'pen_penetration',
+                         'pen_rof', 'pen_aim_time', 'pen_accuracy',
+                         'pen_tur_elevation']
             for tank in tank_data:
                 for val in tank_vals:
                     f.write(str(tank[val]) + sep)
