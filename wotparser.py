@@ -82,9 +82,10 @@ class WotWikiParser(object):
     def findGuns(self, soup):
         '''Find the list of guns for the tank passed. Expects BeautifulSoup
         input. Return the list and values in an array of dictionaries:
-        [ { "name": "val",  "he_dmg" : "val", "ap_dmg" : "val", 
-        "penetration" : "val", "rof" : "val", "aim_time" : "val",
-        "accuracy" : "val", "elev" : "val", "tier" : "val" }, ... ].'''
+        [ { "name": "val",  "he_dmg" : { "he1" : "val", ... }, "rof" : "val",
+        "aim_time" : "val", "penetration" : "val", "accuracy" : "val",
+        "ap_dmg" : { "ap1" : "val", ... }, "elev" : "val",
+        "tier" : "val" }, ... ].'''
         info = soup.find_all('table', {'class':'moduleTable'})
         guns = []
         elreg = '<td(.+)>[-\+]+[0-9\.]+<span(.+)>/[-\+]+[0-9\.]+<span(.+)></td>'
@@ -201,14 +202,16 @@ class WotWikiParser(object):
     def parseHighestDmg(self, guns):
         '''Find the gun with the highest damage. Expects a url in the form of:
         wiki.worldoftanks.com/T1_Cunningham. Return the values in the form of:
-        { "dmg" : "val", "penetration" : "val", "rof" : "val", 
-        "aim_time" : "val", "accuracy" : "val", "elev" : "val",
-        "tier" : "val"}.'''
-        # If dmg is same, go to penetration; if same, highest penetration.
+        { "gun_dmg" : "val", "gun_pen" : "val", "gun_rof" : "val", 
+        "gun_name" : "val", "gun_aim" : "val", "gun_acc" : "val",
+        "gun_ele" : "val", "gun_tier" : "val" }.'''
         gun_info = {'gun_dmg':0, 'gun_pen':0, 'gun_rof':0, 'gun_aim':0,
                     'gun_acc':0, 'gun_ele':'N/A', 'gun_name':'none',
                     'gun_tier':0}
         for gun in guns:
+            # Find highest dmg AP gun. If dmg value is higher, set values. If
+            # dmg values are the same check penetration values. If pen values
+            # are the same, check the rate of fire.
             for k,v in gun['ap_dmg'].iteritems():
                 if int(v) > gun_info['gun_dmg']:
                     gun_info['gun_dmg'] = int(v)
@@ -239,6 +242,9 @@ class WotWikiParser(object):
                             gun_info['gun_acc'] = gun['accuracy']
                             gun_info['gun_ele'] = gun['elev']
                             gun_info['gun_tier'] = gun['tier']
+            # Find highest dmg HE gun. If dmg value is higher, set values. If
+            # dmg values are the same check penetration values. If pen values
+            # are the same, check the rate of fire.
             for k,v in gun['he_dmg'].iteritems():
                 if int(v) > gun_info['gun_dmg']:
                     gun_info['gun_dmg'] = int(v)
@@ -272,14 +278,16 @@ class WotWikiParser(object):
 
     def parseHighestPen(self, guns):
         '''Find the gun with the highest penetration and return the values in 
-        the form of: { "dmg" : "val", "penetration" : "val", "rof" : "val", 
-        "aim_time" : "val", "accuracy" : "val", "elev" : "val"}.'''
-        # If penetration is same, go to dmg; if same, highest tier.
-        # If dmg is same, go to penetration; if same, highest penetration.
+        the form of: { "gun_dmg" : "val", "gun_pen" : "val", "gun_rof" : "val", 
+        "gun_name" : "val", "gun_aim" : "val", "gun_acc" : "val",
+        "gun_ele" : "val", "gun_tier" : "val" }.'''
         gun_info = {'gun_dmg':0, 'gun_pen':0, 'gun_rof':0, 'gun_aim':0,
                     'gun_acc':0, 'gun_ele':'N/A', 'gun_name':'none',
                     'gun_tier':0}
         for gun in guns:
+            # Find highest penetration AP gun. If pen value is higher, set 
+            # values. If pen values are the same check dmg values. If dmg values
+            # are the same, check the rate of fire.
             for k,v in gun['ap_pen'].iteritems():
                 if int(v) > gun_info['gun_pen']:
                     gun_info['gun_pen'] = int(v)
@@ -310,6 +318,9 @@ class WotWikiParser(object):
                             gun_info['gun_acc'] = gun['accuracy']
                             gun_info['gun_ele'] = gun['elev']
                             gun_info['gun_tier'] = gun['tier']
+            # Find highest penetration HE gun. If pen value is higher, set 
+            # values. If pen values are the same check dmg values. If dmg values
+            # are the same, check the rate of fire.
             for k,v in gun['he_pen'].iteritems():
                 if int(v) > gun_info['gun_pen']:
                     gun_info['gun_pen'] = int(v)
@@ -360,9 +371,10 @@ class WotWikiParser(object):
         soup = BeautifulSoup(html, 'html.parser')
         info = soup.find('div', {'class':'Tank'})
         # Initialize all the values in case they don't appear in the HTML.
-        tank_vals = {'premium':'No','tank_name':'N/A','tank_country':'N/A',
-                     'tank_class':'N/A','tank_tier':'N/A','bt_min':'N/A',
-                     'bt_max':'N/A','top_hp':'N/A','top_traverse':'N/A',
+        tank_vals = {'tank_status':'Standard','tank_name':'N/A',
+                     'tank_country':'N/A', 'tank_class':'N/A',
+                     'tank_tier':'N/A','bt_min':'N/A', 'bt_max':'N/A',
+                     'top_hp':'N/A','top_traverse':'N/A',
                      'top_pwr_rto':'N/A','top_hull_armor':'N/A',
                      'top_tur_traverse':'N/A', 'top_fire_chance':'N/A',
                      'top_view_range':'N/A', 'top_sig_range':'N/A', 
@@ -399,11 +411,13 @@ class WotWikiParser(object):
                     tank_vals[v] = info.find('th', text=re.compile(k)).find_next('span', 'top').contents[0]
             # Look for the tank name.
             if info.select('.mw-headline'):
-                # Premium tanks have an <img> tag so we need to try to remove
-                # that so we can just grab the name.
+                # Premium, Gift, and Unavailable tanks have an <img> tag so we
+                # need to try to remove that so we can grab the tank name and
+                # grab the status (premium, etc.).
                 tank_name = info.select('.mw-headline')[0]
+                img = ''
                 try:
-                    tank_name.img.extract()
+                    img = tank_name.img.extract()
                 except:
                     pass
                 # Fix some character encoding.
@@ -412,6 +426,8 @@ class WotWikiParser(object):
                 tank_name = tank_name.replace(u'\xe2', u'a')
                 tank_name = tank_name.replace(u'\xf6', u'o')
                 tank_vals['tank_name'] = tank_name
+                if img:
+                    tank_vals['tank_status'] = img.get('alt', '')
             # Find the tank country.
             if info.select('.NTC > tr > td'):
                 tank_vals['tank_country'] = info.select('.NTC > tr > td')[0].contents[0]
@@ -483,12 +499,12 @@ class WotWikiParser(object):
                    'Highest Damage Armament (Excludes Gold Rounds)',
                    'Highest Penetration Armament (Excludes Gold Rounds)']
         sub_headers = ['Vehicle', 'Class', 'Tier', 'Min Battle Tier', 
-                       'Max Battle Tier', 'Country', 'Power Ratio (hp/t)',
-                       'Traverse Speed (d/s)', 'Gun/Turret Traverse (d/s)',
-                       'View Range (m)', 'Signal Range (m)',  'Hit Points',
-                       'Hull Armor (mm)', 'Turret Armor (mm)',
-                       'Avg Dmg (HP)', 'Penetration (mm)', 'Rate of Fire (r/m)',
-                       'Aim Time (s)', 'Accuracy (m)',
+                       'Max Battle Tier', 'Country', 'Status',
+                       'Power Ratio (hp/t)', 'Traverse Speed (d/s)',
+                       'Gun/Turret Traverse (d/s)', 'View Range (m)',
+                       'Signal Range (m)',  'Hit Points', 'Hull Armor (mm)',
+                       'Turret Armor (mm)', 'Avg Dmg (HP)', 'Penetration (mm)',
+                       'Rate of Fire (r/m)', 'Aim Time (s)', 'Accuracy (m)',
                        'Front Elevation (degrees)', 'Avg Dmg (HP)',
                        'Penetration (mm)', 'Rate of Fire (r/m)', 'Aim Time (s)',
                        'Accuracy (m)', 'Front Elevation (degrees)']
@@ -509,7 +525,7 @@ class WotWikiParser(object):
             f.write('\n')
             # Write the tank data in the order from the list.
             tank_vals = ['tank_name', 'tank_class', 'tank_tier', 'bt_min',
-                         'bt_max', 'tank_country', 'top_pwr_rto', 
+                         'bt_max', 'tank_country', 'tank_status', 'top_pwr_rto',
                          'top_traverse','top_tur_traverse', 'top_view_range',
                          'top_sig_range', 'top_hp', 'top_hull_armor',
                          'top_tur_armor', 'dmg_avg_dmg', 'dmg_penetration',
