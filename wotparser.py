@@ -9,6 +9,7 @@
 # System imports
 import datetime
 import optparse
+import os
 import re
 import urllib2
 
@@ -44,7 +45,7 @@ class WotWikiParser(object):
         # Initialize the soup.
         try:
             html = urllib2.urlopen(url).read()
-        except:
+        except urllib2.URLError:
             print 'Failed to open URL: ' + url
             exit(1)
         soup = BeautifulSoup(html, 'html.parser')
@@ -55,8 +56,8 @@ class WotWikiParser(object):
             server = 'EU Server:'
         elif 'Asia' in region:
             server = 'Asian Server:'
-        version = soup.find('b', text=re.compile(server)).find_next('a').contents[0]
-        return version
+        wotver = soup.find('b', text=re.compile(server)).find_next('a').contents[0]
+        return wotver
 
     def findTanks(self, url):
         """Find all the tanks! Scrapes the full list of tanks for each country
@@ -65,7 +66,7 @@ class WotWikiParser(object):
         # Initialize the soup.
         try:
             html = urllib2.urlopen(url).read()
-        except:
+        except urllib2.URLError:
             print 'Failed to open URL: ' + url
             exit(1)
         soup = BeautifulSoup(html, 'html.parser')
@@ -88,7 +89,7 @@ class WotWikiParser(object):
         # Initialize the soup.
         try:
             html = urllib2.urlopen(url).read()
-        except:
+        except urllib2.URLError:
             print 'Failed to open URL: ' + url
             exit(1)
         info = BeautifulSoup(html, 'html.parser')
@@ -145,7 +146,7 @@ class WotWikiParser(object):
             # Look for the tank name using <div> and <span> tags.
             try:
                 tank_name = info.find('div', {'class': 'b-performance_border'}).find('span', {'class': 'mw-headline'})
-            except:
+            except AttributeError:
                 tank_name = None
             if tank_name:
                 # Premium, Gift, and Unavailable tanks have an <img> tag.
@@ -167,25 +168,35 @@ class WotWikiParser(object):
             # Find the tank country, class, and tier.
             try:
                 tank_data = info.find('div', {'class': 'b-performance_position'})
-            except:
+            except AttributeError:
                 tank_data = None
             if tank_data:
                 tank_vals['tank_country'], \
                 tank_vals['tank_class'], \
                 tank_vals['tank_tier'] = tank_data.text.split(' | ')
             # Look for the tank tier, remove the word 'Tier' and replace the
-            # Roman numerals with numbers (helps with sorting).
+            # Roman numerals with numbers for sorting.
             roms = {'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5',
                     'VI': '6', 'VII': '7', 'VIII': '8', 'IX': '9', 'X': '10'}
             tank_vals['tank_tier'] = tank_vals['tank_tier'].strip('Tier ')
             if tank_vals['tank_tier'] in roms:
                 tank_vals['tank_tier'] = roms[tank_vals['tank_tier']]
-            # TODO: Find the MIN and MAX battle tiers in which tank fights.
+            # Find the MIN and MAX battle tiers in which tank fights.
+            try:
+                battle_tiers = info.find('span', {'class': 'b-battles-levels_interval'}).children
+                tiers = []
+                for bt in battle_tiers:
+                    tiers.append(int(bt.text))
+            except AttributeError:
+                battle_tiers = None
+            if battle_tiers:
+                tank_vals['bt_min'] = min(tiers)
+                tank_vals['bt_max'] = max(tiers)
 
             # Find the hull armor value using <span> tag and strip 'mm'.
             try:
                 hull_armor = info.find('span', text=re.compile('Hull Armor')).find_previous('span', {'class': 't-performance_right'}).text
-            except:
+            except AttributeError:
                 hull_armor = None
             if hull_armor:
                 tank_vals['top_hull_armor'] = hull_armor.strip(' mm')
@@ -260,7 +271,7 @@ if __name__ == '__main__':
                            'USSR, China, and Japan. Specify one or more in ' +
                            'a comma separated list. Default: all.')
     parser.add_option('-f', '--file', default=None, dest='outfile',
-                      help='File write data to. Default: WoT_Tank_data.csv.')
+                      help='File to write data to. Default: WoT_Tank_data.csv.')
     parser.add_option('-t', '--types', default=None, dest='types',
                       help='Available types: Light, Medium, Heavy, TD, SPG. ' +
                            'Specify one or more in a comma separated list. ' +
@@ -270,14 +281,14 @@ if __name__ == '__main__':
                            'more in a comma separated list. Example: ' +
                            '"Tiger II, T-34, WZ-120".')
     (options, args) = parser.parse_args()
-    # Prevent using specific vehicles with types or countries.
+    # Prevent specifying vehicles and types or countries.
     if options.vehicles and (options.types or options.countries):
         print 'Vehicles cannot be specified with countries or types.'
         exit(1)
 
     # Setup some default values.
     data = []
-    outfile = 'WoT_Tank_Data.csv'
+    outfile = os.path.join(os.getcwd(), 'WoT_Tank_Data.csv')
     countries = ['USA', 'UK', 'Germany', 'France', 'USSR', 'China', 'Japan']
     wiki = 'http://wiki.wargaming.net'
     lang = '/en/'
@@ -286,6 +297,7 @@ if __name__ == '__main__':
                   'SPG': 'Self-Propelled Guns'}
     # Initialize the class.
     w = WotWikiParser()
+    # Get the WoT version from the wiki.
     version = w.findVersion(wiki + lang + 'World_of_Tanks')
     # If output file is specified on the CLI use that, otherwise use default.
     if options.outfile:
@@ -322,5 +334,5 @@ if __name__ == '__main__':
                 print 'Looking for: ' + tank
                 data.append(w.parseTankData(wiki + tank))
     # Write the compiled data to the document.
-    print 'Writing data to document'
+    print 'Writing data to document: ' + outfile
     w.docCreate(version, data, outfile)
