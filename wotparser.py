@@ -162,6 +162,7 @@ class WotWikiParser(object):
                 tank_name = tank_name.replace(u'\xe4', u'a')
                 tank_name = tank_name.replace(u'\xe2', u'a')
                 tank_name = tank_name.replace(u'\xf6', u'o')
+                tank_name = tank_name.replace(u'\u00E9', u'e')
                 tank_vals['tank_name'] = tank_name
                 if img:
                     tank_vals['tank_status'] = img.get('alt', '')
