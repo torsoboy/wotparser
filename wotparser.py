@@ -1,8 +1,8 @@
 #! /usr/bin/python
 
 # This program scrapes data from the World of Tanks wiki 
-# (wiki.wargaming.net) and dumps it in to a CSV file. Requires BeautifulSoup4
-# Python module: (http://www.crummy.com/software/BeautifulSoup/)
+# (wiki.wargaming.net) and dumps it in to a CSV file. Requires Python 3 and
+# BeautifulSoup4 Python module: (http://www.crummy.com/software/BeautifulSoup/)
 #
 # Written by Tor5oBoy (iamtorsoboy@gmail.com)
 
@@ -11,7 +11,9 @@ import datetime
 import optparse
 import os
 import re
-import urllib2
+import urllib.request
+import urllib.parse
+import urllib.error
 
 # 3rd party imports
 from bs4 import BeautifulSoup
@@ -26,8 +28,8 @@ class WotWikiParser(object):
         - docCreate(): Write the data out to a CSV file."""
 
     def __init__(self):
-        self._tank_types = ['Light Tanks', 'Medium Tanks', 'Heavy Tanks',
-                            'Tank Destroyers', 'Self-Propelled Guns']
+        self._tank_types = ['Light_Tanks', 'Medium_Tanks', 'Heavy_Tanks',
+                            'Tank_Destroyers', 'Self-Propelled_Guns']
 
     @property
     def tank_types(self):
@@ -44,11 +46,11 @@ class WotWikiParser(object):
         specified. Available countries: Asia, EU, NA. Default: NA."""
         # Initialize the soup.
         try:
-            html = urllib2.urlopen(url).read()
-        except urllib2.URLError:
-            print 'Failed to open URL: ' + url
+            html = urllib.request.urlopen(url).read()
+        except urllib.error.URLError:
+            print('Failed to open URL: ' + url)
             exit(1)
-        soup = BeautifulSoup(html, 'html.parser')
+        soup = BeautifulSoup(html, 'html5lib')
         # Based on the region passed, look for the version in the <a> tag.
         if 'NA' in region:
             server = 'NA Server:'
@@ -56,7 +58,10 @@ class WotWikiParser(object):
             server = 'EU Server:'
         elif 'Asia' in region:
             server = 'Asian Server:'
-        wotver = soup.find('b', text=re.compile(server)).find_next('a').contents[0]
+        else:
+            server = ''
+        wotver = soup.find('b', text=re.compile(server)).find_next(
+            'a').contents[0]
         return wotver
 
     def findTanks(self, url):
@@ -65,16 +70,17 @@ class WotWikiParser(object):
         wiki.wargaming.net/en/ussr."""
         # Initialize the soup.
         try:
-            html = urllib2.urlopen(url).read()
-        except urllib2.URLError:
-            print 'Failed to open URL: ' + url
+            html = urllib.request.urlopen(url).read()
+        except urllib.error.URLError:
+            print('Failed to open URL: ' + url)
             exit(1)
-        soup = BeautifulSoup(html, 'html.parser')
+        soup = BeautifulSoup(html, 'html5lib')
         links = []
         # Grab the url for each tank type in self.tank_types.
         for tank_type in self.tank_types:
-            if soup.find('span', text=re.compile(tank_type)):
-                tanks = soup.find('span', text=re.compile(tank_type)).find_next('ul').find_all('a')
+            if soup.find('span', {'id': tank_type}):
+                tanks = soup.find('span', {'id': tank_type}).find_next(
+                    'ul').find_all('a')
                 for t in tanks:
                     link = t.get('href')
                     links.append(link)
@@ -88,11 +94,11 @@ class WotWikiParser(object):
         the form of { "key" : "value" }."""
         # Initialize the soup.
         try:
-            html = urllib2.urlopen(url).read()
-        except urllib2.URLError:
-            print 'Failed to open URL: ' + url
+            html = urllib.request.urlopen(url).read()
+        except urllib.error.URLError:
+            print('Failed to open URL: ' + url)
             exit(1)
-        info = BeautifulSoup(html, 'html.parser')
+        info = BeautifulSoup(html, 'html5lib')
         # Initialize all the values in case they don't appear in the HTML.
         tank_vals = {'tank_status': 'Standard', 'tank_name': 'N/A',
                      'tank_country': 'N/A', 'tank_class': 'N/A',
@@ -107,7 +113,7 @@ class WotWikiParser(object):
                      'gun_aim_time': 'N/A'}
         # If we find data in the soup, start parsing it.
         if info:
-            print 'Found tank at %s' % url
+            print('Found tank at %s' % url)
             # Parse the key/value pairs in the list and if there is a <span> tag
             # that matches, find the previous 'top' <span> tag with the value.
             categories = {'Traverse': 'top_traverse',
@@ -122,13 +128,18 @@ class WotWikiParser(object):
                           'Elevation Arc': 'gun_elevation'}
             for k, v in categories.items():
                 try:
-                    val = info.find('span', text=re.compile(k)).find_previous('span', {'class': 'top'})
+                    val = info.find('span', text=re.compile(k)).find_previous(
+                        #'span', {'class': 't-performance_right'}).find(
+                        #'span', {'class': 'top'})
+                        'td')
+                    print('%s: %s' % (k, val))
                 except AttributeError:
                     val = None
                 if val:
                     tank_vals[v] = val.text
             # Fix encoding to remove degree symbol
-            tank_vals['gun_elevation'] = tank_vals['gun_elevation'].replace(u'\xb0', u'')
+            tank_vals['gun_elevation'] = tank_vals['gun_elevation'].replace(
+                u'\xb0', u'')
             # Parse the key/value pairs in the list and use the <span> tag,
             # <class> tag, <div> tag, and 'next_sibling' to get values.
             categories2 = {'Rate of Fire': 'gun_rof',
@@ -138,14 +149,17 @@ class WotWikiParser(object):
                            'Signal Range': 'top_sig_range'}
             for k, v in categories2.items():
                 try:
-                    val = info.find('span', text=re.compile(k)).find_previous('span', {'class': 'top'}).find('div').next_sibling
+                    val = info.find('span', text=re.compile(k)).find_previous(
+                        'span', {'class': 'top'}).find('div').next_sibling
                 except AttributeError:
                     val = None
                 if val:
                     tank_vals[v] = val.strip('\n')
             # Look for the tank name using <div> and <span> tags.
             try:
-                tank_name = info.find('div', {'class': 'b-performance_border'}).find('span', {'class': 'mw-headline'})
+                tank_name = info.find('div', {
+                    'class': 'b-performance_border'}).find(
+                    'span', {'class': 'mw-headline'})
             except AttributeError:
                 tank_name = None
             if tank_name:
@@ -153,7 +167,7 @@ class WotWikiParser(object):
                 # Remove tag to get tank name and status (premium, etc.).
                 try:
                     img = tank_name.img.extract()
-                except:
+                except AttributeError:
                     img = None
                 # Fix some character encodings.
                 tank_name = tank_name.text
@@ -163,12 +177,15 @@ class WotWikiParser(object):
                 tank_name = tank_name.replace(u'\xe2', u'a')
                 tank_name = tank_name.replace(u'\xf6', u'o')
                 tank_name = tank_name.replace(u'\u00E9', u'e')
+                tank_name = tank_name.replace(u'\u0160', u'S')
+                tank_name = tank_name.replace(u'\u0161', u's')
                 tank_vals['tank_name'] = tank_name
                 if img:
                     tank_vals['tank_status'] = img.get('alt', '')
             # Find the tank country, class, and tier.
             try:
-                tank_data = info.find('div', {'class': 'b-performance_position'})
+                tank_data = info.find('div', {
+                    'class': 'b-performance_position'})
             except AttributeError:
                 tank_data = None
             if tank_data:
@@ -184,7 +201,8 @@ class WotWikiParser(object):
                 tank_vals['tank_tier'] = roms[tank_vals['tank_tier']]
             # Find the MIN and MAX battle tiers in which tank fights.
             try:
-                battle_tiers = info.find('span', {'class': 'b-battles-levels_interval'}).children
+                battle_tiers = info.find('span', {
+                    'class': 'b-battles-levels_interval'}).children
                 tiers = []
                 for bt in battle_tiers:
                     tiers.append(int(bt.text))
@@ -196,13 +214,15 @@ class WotWikiParser(object):
 
             # Find the hull armor value using <span> tag and strip 'mm'.
             try:
-                hull_armor = info.find('span', text=re.compile('Hull Armor')).find_previous('span', {'class': 't-performance_right'}).text
+                hull_armor = info.find('span', text=re.compile(
+                    'Hull Armor')).find_previous(
+                    'span', {'class': 't-performance_right'}).text
             except AttributeError:
                 hull_armor = None
             if hull_armor:
                 tank_vals['top_hull_armor'] = hull_armor.strip(' mm')
         else:
-            print 'Something went wrong or no info found at %s!' % url
+            print('Something went wrong or no info found at %s!' % url)
         # Add a single quote to the start of some values to tell spreadsheet to
         # treat the value as-is without trying to convert it to a date, etc.
         tank_vals['top_tur_armor'] = '\'' + tank_vals['top_tur_armor']
@@ -255,7 +275,7 @@ class WotWikiParser(object):
                     try:
                         f.write(str(td[val]) + sep)
                     except UnicodeEncodeError:
-                        print 'Failed to write: ', td[val]
+                        print('Failed to write: ', td[val])
                 f.write('\n')
 
 if __name__ == '__main__':
@@ -284,18 +304,19 @@ if __name__ == '__main__':
     (options, args) = parser.parse_args()
     # Prevent specifying vehicles and types or countries.
     if options.vehicles and (options.types or options.countries):
-        print 'Vehicles cannot be specified with countries or types.'
+        print('Vehicles cannot be specified with countries or types.')
         exit(1)
 
     # Setup some default values.
     data = []
     outfile = os.path.join(os.getcwd(), 'WoT_Tank_Data.csv')
-    countries = ['USA', 'UK', 'Germany', 'France', 'USSR', 'China', 'Japan']
+    countries = ['USA', 'UK', 'Germany', 'France', 'USSR', 'China', 'Japan',
+                 'Czechoslovakia', 'Sweden']
     wiki = 'http://wiki.wargaming.net'
     lang = '/en/'
-    tank_types = {'Light': 'Light Tanks', 'Medium': 'Medium Tanks',
-                  'Heavy': 'Heavy Tanks', 'TD': 'Tank Destroyers',
-                  'SPG': 'Self-Propelled Guns'}
+    tank_types = {'Light': 'Light_Tanks', 'Medium': 'Medium_Tanks',
+                  'Heavy': 'Heavy_Tanks', 'TD': 'Tank_Destroyers',
+                  'SPG': 'Self-Propelled_Guns'}
     # Initialize the class.
     w = WotWikiParser()
     # Get the WoT version from the wiki.
@@ -316,7 +337,7 @@ if __name__ == '__main__':
             if t in tank_types:
                 w.tank_types.append(tank_types[t])
             else:
-                print 'Skipping invalid vehicle type: ' + t
+                print('Skipping invalid vehicle type: ' + t)
     # If vehicle list is passed on CLI, use that list to parse data for
     # specified vehicles, otherwise parse the data for vehicles and
     # countries specified.
@@ -332,8 +353,8 @@ if __name__ == '__main__':
             country = lang + country
             tank_list = w.findTanks(wiki + country)
             for tank in tank_list:
-                print 'Looking for: ' + tank
+                print('Looking for: ' + tank)
                 data.append(w.parseTankData(wiki + tank))
     # Write the compiled data to the document.
-    print 'Writing data to document: ' + outfile
+    print('Writing data to document: ' + outfile)
     w.docCreate(version, data, outfile)
