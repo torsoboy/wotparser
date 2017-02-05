@@ -129,10 +129,9 @@ class WotWikiParser(object):
             for k, v in categories.items():
                 try:
                     val = info.find('span', text=re.compile(k)).find_previous(
-                        #'span', {'class': 't-performance_right'}).find(
-                        #'span', {'class': 'top'})
-                        'td')
-                    print('%s: %s' % (k, val))
+                        'span', {'class': 't-performance_right'}).find(
+                        'span', {'class': 'top'})
+                    # print('%s: %s' % (k, val))
                 except AttributeError:
                     val = None
                 if val:
@@ -169,17 +168,17 @@ class WotWikiParser(object):
                     img = tank_name.img.extract()
                 except AttributeError:
                     img = None
-                # Fix some character encodings.
-                tank_name = tank_name.text
-                tank_name = tank_name.replace(u'\xa0', u'')
-                tank_name = tank_name.replace(u'\xdf', u'B')
-                tank_name = tank_name.replace(u'\xe4', u'a')
-                tank_name = tank_name.replace(u'\xe2', u'a')
-                tank_name = tank_name.replace(u'\xf6', u'o')
-                tank_name = tank_name.replace(u'\u00E9', u'e')
-                tank_name = tank_name.replace(u'\u0160', u'S')
-                tank_name = tank_name.replace(u'\u0161', u's')
-                tank_vals['tank_name'] = tank_name
+                # Fix some character encodings. -- No longer needed --
+                # tank_name = tank_name.text
+                # tank_name = tank_name.replace(u'\xa0', u'')
+                # tank_name = tank_name.replace(u'\xdf', u'B')
+                # tank_name = tank_name.replace(u'\xe4', u'a')
+                # tank_name = tank_name.replace(u'\xe2', u'a')
+                # tank_name = tank_name.replace(u'\xf6', u'o')
+                # tank_name = tank_name.replace(u'\u00E9', u'e')
+                # tank_name = tank_name.replace(u'\u0160', u'S')
+                # tank_name = tank_name.replace(u'\u0161', u's')
+                tank_vals['tank_name'] = tank_name.text
                 if img:
                     tank_vals['tank_status'] = img.get('alt', '')
             # Find the tank country, class, and tier.
@@ -247,7 +246,7 @@ class WotWikiParser(object):
                        'Turret Armor (mm)', 'Damage (HP)', 'Penetration (mm)',
                        'Rate of Fire (r/m)', 'Aim Time (s)', 'Accuracy (m)',
                        'Front Elevation (degrees)']
-        with open(outfile, 'w') as f:
+        with open(outfile, 'w', encoding='utf-8') as f:
             # Write the WoT version.
             f.write('WoT Version:%s%s%s%s' % (sep, str(version), sep, sep))
             # Write the document creation date.
@@ -302,6 +301,7 @@ if __name__ == '__main__':
                            'more in a comma separated list. Example: ' +
                            '"Tiger II, T-34, WZ-120".')
     (options, args) = parser.parse_args()
+
     # Prevent specifying vehicles and types or countries.
     if options.vehicles and (options.types or options.countries):
         print('Vehicles cannot be specified with countries or types.')
